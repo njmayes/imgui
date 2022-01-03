@@ -12,6 +12,7 @@ project "ImGui"
 		"imgui.cpp",
 		"imgui_draw.cpp",
 		"imgui_internal.h",
+		"imgui_tables.cpp",
 		"imgui_widgets.cpp",
 		"imstb_rectpack.h",
 		"imstb_textedit.h",
@@ -19,21 +20,10 @@ project "ImGui"
 		"imgui_demo.cpp"
 	}
 
-	filter "system:windows"
-		systemversion "latest"
+    filter "system:windows"
+        staticruntime "On"
 		cppdialect "C++17"
-		staticruntime "On"
-
-	filter "system:linux"
-		pic "On"
-		systemversion "latest"
-		cppdialect "C++17"
-		staticruntime "On"
-
-	filter "configurations:Debug"
-		runtime "Debug"
-		symbols "on"
-
-	filter "configurations:Release"
-		runtime "Release"
-		optimize "on"
+        systemversion "latest"
+      
+    filter {"system:windows", "configurations:Release"}
+        buildoptions "/MT"

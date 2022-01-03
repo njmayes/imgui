@@ -1,3 +1,5 @@
+#This is a fork of Dear ImGui with a premake5 file for use with the Labyrinth Engine. See https://github.com/amayesingnathan/LabyrinthEngine
+
 Dear ImGui
 =====
 [![Build Status](https://github.com/ocornut/imgui/workflows/build/badge.svg)](https://github.com/ocornut/imgui/actions?workflow=build) [![Static Analysis Status](https://github.com/ocornut/imgui/workflows/static-analysis/badge.svg)](https://github.com/ocornut/imgui/actions?workflow=static-analysis)

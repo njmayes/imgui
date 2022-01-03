@@ -4,6 +4,10 @@
 ## Dear ImGui artifacts
 imgui.ini
 
+#Ignore binaries and VS project files
+bin
+*.vcxproj
+
 ## General build artifacts
 *.o
 *.obj

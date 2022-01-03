@@ -1,4 +1,4 @@
-#This is a fork of Dear ImGui with a premake5 file for use with the Labyrinth Engine. See https://github.com/amayesingnathan/LabyrinthEngine
+**This is a fork of Dear ImGui with a premake5 file for use with the Labyrinth Engine. See https://github.com/amayesingnathan/LabyrinthEngine**
 
 Dear ImGui
 =====

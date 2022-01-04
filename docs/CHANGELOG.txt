@@ -46,12 +46,16 @@ Breaking Changes:
 
 Other Changes:
 
+- Fixed a situation where CTRL+Tab or Modal can occasionally lead to the creation of ImDrawCmd with zero triangles,
+  which would makes the draw operation of some backends assert (e.g. Metal with debugging). (#4857)
 - Tables, ImDrawListSplitter: Fixed erroneously stripping trailing ImDrawList::AddCallback() when submitted in
   last column or last channel and when there are no other drawing operation. (#4843, #4844) [@hoffstadt]
 - Backends: OpenGL3: Fixed a buffer overflow in imgui_impl_opengl3_loader.h init (added in 1.86). (#4468, #4830) [@dymk]
   It would generally not have noticeable side-effect at runtime but would be detected by runtime checkers.
 - Backends: Metal: Added Apple Metal C++ API support. (#4824, #4746) [@luigifcruz]
   Enable with '#define IMGUI_IMPL_METAL_CPP' in your imconfig.h file.
+- Backends: Metal: Ignore ImDrawCmd where ElemCount == 0, which are normally not emitted by the library but
+  can theorically be created by user code manipulating a ImDrawList. (#4857)
 
 
 -----------------------------------------------------------------------

@@ -295,6 +295,7 @@ CODE
        // TODO: Setup viewport covering draw_data->DisplayPos to draw_data->DisplayPos + draw_data->DisplaySize
        // TODO: Setup orthographic projection matrix cover draw_data->DisplayPos to draw_data->DisplayPos + draw_data->DisplaySize
        // TODO: Setup shader: vertex { float2 pos, float2 uv, u32 color }, fragment shader sample color from 1 texture, multiply by vertex color.
+       ImVec2 clip_off = draw_data->DisplayPos;
        for (int n = 0; n < draw_data->CmdListsCount; n++)
        {
           const ImDrawList* cmd_list = draw_data->CmdLists[n];
@@ -309,9 +310,11 @@ CODE
              }
              else
              {
-                 // The texture for the draw call is specified by pcmd->GetTexID().
-                 // The vast majority of draw calls will use the Dear ImGui texture atlas, which value you have set yourself during initialization.
-                 MyEngineBindTexture((MyTexture*)pcmd->GetTexID());
+                 // Project scissor/clipping rectangles into framebuffer space
+                 ImVec2 clip_min(pcmd->ClipRect.x - clip_off.x, pcmd->ClipRect.y - clip_off.y);
+                 ImVec2 clip_max(pcmd->ClipRect.z - clip_off.x, pcmd->ClipRect.w - clip_off.y);
+                 if (clip_max.x <= clip_min.x || clip_max.y <= clip_min.y)
+                     continue;
 
                  // We are using scissoring to clip some objects. All low-level graphics API should support it.
                  // - If your engine doesn't support scissoring yet, you may ignore this at first. You will get some small glitches
@@ -322,14 +325,16 @@ CODE
                  //   - In the interest of supporting multi-viewport applications (see 'docking' branch on github),
                  //     always subtract draw_data->DisplayPos from clipping bounds to convert them to your viewport space.
                  // - Note that pcmd->ClipRect contains Min+Max bounds. Some graphics API may use Min+Max, other may use Min+Size (size being Max-Min)
-                 ImVec2 pos = draw_data->DisplayPos;
-                 MyEngineScissor((int)(pcmd->ClipRect.x - pos.x), (int)(pcmd->ClipRect.y - pos.y), (int)(pcmd->ClipRect.z - pos.x), (int)(pcmd->ClipRect.w - pos.y));
+                 MyEngineSetScissor(clip_min.x, clip_min.y, clip_max.x, clip_max.y);
+
+                 // The texture for the draw call is specified by pcmd->GetTexID().
+                 // The vast majority of draw calls will use the Dear ImGui texture atlas, which value you have set yourself during initialization.
+                 MyEngineBindTexture((MyTexture*)pcmd->GetTexID());
 
                  // Render 'pcmd->ElemCount/3' indexed triangles.
                  // By default the indices ImDrawIdx are 16-bit, you can change them to 32-bit in imconfig.h if your engine doesn't support 16-bit indices.
-                 MyEngineDrawIndexedTriangles(pcmd->ElemCount, sizeof(ImDrawIdx) == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT, idx_buffer, vtx_buffer);
+                 MyEngineDrawIndexedTriangles(pcmd->ElemCount, sizeof(ImDrawIdx) == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT, idx_buffer + pcmd->IdxOffset, vtx_buffer, pcmd->VtxOffset);
              }
-             idx_buffer += pcmd->ElemCount;
           }
        }
     }
@@ -381,6 +386,7 @@ CODE
  When you are not sure about an old symbol or function name, try using the Search/Find function of your IDE to look for comments or references in all imgui files.
  You can read releases logs https://github.com/ocornut/imgui/releases for more details.
 
+ - 2022/03/05 (1.87) - removed io.ImeSetInputScreenPosFn() in favor of more flexible io.SetPlatformImeDataFn(). Removed 'void* io.ImeWindowHandle' in favor of writing to 'void* ImGuiViewport::PlatformHandleRaw'.
  - 2022/03/01 (1.87) - commented out redirecting functions/enums names that were marked obsolete in 1.69, 1.70, 1.71, 1.72 (March-July 2019)
                         - ImGui::SetNextTreeNodeOpen()        -> use ImGui::SetNextItemOpen()
                         - ImGui::GetContentRegionAvailWidth() -> use ImGui::GetContentRegionAvail().x
@@ -914,7 +920,7 @@ static void             WindowSettingsHandler_WriteAll(ImGuiContext*, ImGuiSetti
 // Platform Dependents default implementation for IO functions
 static const char*      GetClipboardTextFn_DefaultImpl(void* user_data);
 static void             SetClipboardTextFn_DefaultImpl(void* user_data, const char* text);
-static void             ImeSetInputScreenPosFn_DefaultImpl(int x, int y);
+static void             SetPlatformImeDataFn_DefaultImpl(ImGuiViewport* viewport, ImGuiPlatformImeData* data);
 
 namespace ImGui
 {
@@ -1131,8 +1137,7 @@ ImGuiIO::ImGuiIO()
     GetClipboardTextFn = GetClipboardTextFn_DefaultImpl;   // Platform dependent default implementations
     SetClipboardTextFn = SetClipboardTextFn_DefaultImpl;
     ClipboardUserData = NULL;
-    ImeSetInputScreenPosFn = ImeSetInputScreenPosFn_DefaultImpl;
-    ImeWindowHandle = NULL;
+    SetPlatformImeDataFn = SetPlatformImeDataFn_DefaultImpl;
 
     // Input (NB: we already have memset zero the entire structure!)
     MousePos = ImVec2(-FLT_MAX, -FLT_MAX);
@@ -4141,7 +4146,10 @@ void ImGui::NewFrame()
 
     g.MouseCursor = ImGuiMouseCursor_Arrow;
     g.WantCaptureMouseNextFrame = g.WantCaptureKeyboardNextFrame = g.WantTextInputNextFrame = -1;
-    g.PlatformImePos = ImVec2(1.0f, 1.0f); // OS Input Method Editor showing on top-left of our window by default
+
+    // Platform IME data: reset for the frame
+    g.PlatformImeDataPrev = g.PlatformImeData;
+    g.PlatformImeData.WantVisible = false;
 
     // Mouse wheel scrolling, scale
     UpdateMouseWheel();
@@ -4547,12 +4555,9 @@ void ImGui::EndFrame()
 
     ErrorCheckEndFrameSanityChecks();
 
-    // Notify OS when our Input Method Editor cursor has moved (e.g. CJK inputs using Microsoft IME)
-    if (g.IO.ImeSetInputScreenPosFn && (g.PlatformImeLastPos.x == FLT_MAX || ImLengthSqr(g.PlatformImeLastPos - g.PlatformImePos) > 0.0001f))
-    {
-        g.IO.ImeSetInputScreenPosFn((int)g.PlatformImePos.x, (int)g.PlatformImePos.y);
-        g.PlatformImeLastPos = g.PlatformImePos;
-    }
+    // Notify Platform/OS when our Input Method Editor cursor has moved (e.g. CJK inputs using Microsoft IME)
+    if (g.IO.SetPlatformImeDataFn && memcmp(&g.PlatformImeData, &g.PlatformImeDataPrev, sizeof(ImGuiPlatformImeData)) != 0)
+        g.IO.SetPlatformImeDataFn(GetMainViewport(), &g.PlatformImeData);
 
     // Hide implicit/fallback "Debug" window if it hasn't been used
     g.WithinFrameScopeWithImplicitWindow = false;
@@ -11495,25 +11500,38 @@ static void SetClipboardTextFn_DefaultImpl(void*, const char* text)
 #pragma comment(lib, "imm32")
 #endif
 
-static void ImeSetInputScreenPosFn_DefaultImpl(int x, int y)
+static void SetPlatformImeDataFn_DefaultImpl(ImGuiViewport* viewport, ImGuiPlatformImeData* data)
 {
     // Notify OS Input Method Editor of text input position
-    ImGuiIO& io = ImGui::GetIO();
-    if (HWND hwnd = (HWND)io.ImeWindowHandle)
-        if (HIMC himc = ::ImmGetContext(hwnd))
-        {
-            COMPOSITIONFORM cf;
-            cf.ptCurrentPos.x = x;
-            cf.ptCurrentPos.y = y;
-            cf.dwStyle = CFS_FORCE_POSITION;
-            ::ImmSetCompositionWindow(himc, &cf);
-            ::ImmReleaseContext(hwnd, himc);
-        }
+    HWND hwnd = (HWND)viewport->PlatformHandleRaw;
+#ifndef IMGUI_DISABLE_OBSOLETE_FUNCTIONS
+    if (hwnd == 0)
+        hwnd = (HWND)ImGui::GetIO().ImeWindowHandle;
+#endif
+    if (hwnd == 0)
+        return;
+
+    ::ImmAssociateContextEx(hwnd, NULL, data->WantVisible ? IACE_DEFAULT : 0);
+
+    if (HIMC himc = ::ImmGetContext(hwnd))
+    {
+        COMPOSITIONFORM composition_form = {};
+        composition_form.ptCurrentPos.x = (LONG)data->InputPos.x;
+        composition_form.ptCurrentPos.y = (LONG)data->InputPos.y;
+        composition_form.dwStyle = CFS_FORCE_POSITION;
+        ::ImmSetCompositionWindow(himc, &composition_form);
+        CANDIDATEFORM candidate_form = {};
+        candidate_form.dwStyle = CFS_CANDIDATEPOS;
+        candidate_form.ptCurrentPos.x = (LONG)data->InputPos.x;
+        candidate_form.ptCurrentPos.y = (LONG)data->InputPos.y;
+        ::ImmSetCandidateWindow(himc, &candidate_form);
+        ::ImmReleaseContext(hwnd, himc);
+    }
 }
 
 #else
 
-static void ImeSetInputScreenPosFn_DefaultImpl(int, int) {}
+static void SetPlatformImeDataFn_DefaultImpl(ImGuiViewport*, ImGuiPlatformImeData*) {}
 
 #endif
 

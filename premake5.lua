@@ -29,7 +29,7 @@ project "ImGui"
 		pic "On"
 		systemversion "latest"
         
-    filter "configurations:x64d"
+    filter "configurations:Debug"
 		runtime "Debug"
 		symbols "on"
 
